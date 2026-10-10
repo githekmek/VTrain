@@ -2,7 +2,7 @@ import React,{useState,useEffect,useRef} from 'react';
 import {createRoot} from 'react-dom/client';
 import {messages} from './i18n.js';
 import {starters} from '../lib/starters.js';
-import {matches,schedule} from '../lib/domain.js';
+import {matches,schedule,wordContentChanged} from '../lib/domain.js';
 import './style.css';
 function read(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}}
 function write(key,value){localStorage.setItem(key,JSON.stringify(value));}
@@ -18,6 +18,7 @@ function App(){
  const [data,setData]=useState(null),[demo,setDemo]=useState(false),[registrationEnabled,setRegistrationEnabled]=useState(false),[configured,setConfigured]=useState(null),[loading,setLoading]=useState(true);
  const [page,setPage]=useState('home'),[error,setError]=useState(''),[busy,setBusy]=useState(false),[register,setRegister]=useState(false);
  const [target,setTarget]=useState(l==='de'?'pt':'de'),[search,setSearch]=useState(''),[filter,setFilter]=useState('all');
+ const [editing,setEditing]=useState(null);
  const [modal,setModal]=useState(null),[selected,setSelected]=useState(null),[queue,setQueue]=useState(null),[index,setIndex]=useState(0),[answer,setAnswer]=useState(''),[result,setResult]=useState(null),[mode,setMode]=useState('translation');
  const [audio,setAudio]=useState(null),[recording,setRecording]=useState(false),[audioLang,setAudioLang]=useState(l);
  const recorder=useRef(null),stream=useRef(null),timer=useRef(null),player=useRef(null);
@@ -53,7 +54,7 @@ function App(){
     const xp=eligible&&correct?10+Math.min(previous?.level||0,5)*2:0;
     r={correct,xp,progress,eligible};
     demoSave({...data,progress:{...data.progress,[card.id]:progress},stats:{xp:data.stats.xp+xp,today:data.stats.today+(eligible?1:0)}});
-   }else{r=await api('review',{cardId:card.id,answer,revealed});await refresh();}
+   }else{r=await api('review',{cardId:card.id,revision:card.revision,answer,revealed});await refresh();}
    setResult(r);
   }catch(e){setErr(e);}finally{setBusy(false);}
  }
@@ -78,10 +79,27 @@ function App(){
    rec.start();setRecording(true);timer.current=setTimeout(stopRecord,20000);
   }catch{stream.current?.getTracks().forEach(track=>track.stop());setRecording(false);setError(t.audioFail);}
  }
+ function openEditor(card){
+  player.current?.pause();window.speechSynthesis?.cancel();
+  setEditing(card);setAudio(card.audio||null);setAudioLang(card.audio?.lang||data.user.target);
+  setSelected(null);setError('');setModal('edit');
+ }
  async function saveCard(event){
   event.preventDefault();if(recording||busy)return;setBusy(true);setError('');
   const c={...Object.fromEntries(new FormData(event.currentTarget)),audio};
-  try{if(demo){demoSave({...data,cards:[...data.cards,{...c,id:crypto.randomUUID(),creator_name:data.user.name,creator_id:'demo'}]});}else{await api('card',c);await refresh();}setModal(null);setAudio(null);}catch(e){setErr(e);}finally{setBusy(false);}
+  try{
+   if(demo){
+    if(modal==='edit'&&editing){
+     const changed=wordContentChanged(editing,c),progress={...data.progress};
+     if(changed&&progress[editing.id])progress[editing.id]={...progress[editing.id],due:new Date().toISOString()};
+     demoSave({...data,progress,cards:data.cards.map(card=>card.id===editing.id?{...card,...c}:card)});
+    }else demoSave({...data,cards:[...data.cards,{...c,id:crypto.randomUUID(),creator_name:data.user.name,creator_id:'demo'}]});
+   }else{
+    await api(modal==='edit'?'edit-card':'card',modal==='edit'?{...c,cardId:editing.id,revision:editing.revision}:c);
+    await refresh();
+   }
+   setModal(null);setAudio(null);setEditing(null);
+  }catch(e){setErr(e);if(e.message==='CARD_CHANGED'&&!demo)await refresh().catch(()=>{});}finally{setBusy(false);}
  }
  const logo=<a className="brand" href="/" onClick={e=>{e.preventDefault();setPage('home');setQueue(null);}}><span className="brandmark">V</span>VTrain<span className="branddot">●</span><small className="betabadge">BETA</small></a>;
  const language=<select className="language" aria-label={t.choose} value={l} onChange={e=>changeLanguage(e.target.value)}><option value="de">DE · Deutsch</option><option value="pt">BR · Português</option></select>;
@@ -98,8 +116,8 @@ function App(){
  {page==='tandem'&&<><div className="eyebrow">DE ↔ BR</div><h1>{t.teamTitle}</h1><p className="muted">{t.teamText}</p><section className="teambanner"><span>◎</span><div><strong>{totalXp}</strong><p>{t.xp}</p></div><span>✦</span></section><div className="wordgrid">{(data.partners.length?data.partners:[data.user]).map(p=><div className="panel" key={p.id}><div className="avatar">{p.name.slice(0,1)}</div><h2>{p.name}</h2><p>{t.learn}: {p.target==='de'?'Deutsch':'Português'}</p><strong>{p.xp??data.stats.xp} XP</strong></div>)}</div>{data.partners.length<2&&<p className="notice">{t.teamEmpty}</p>}<div className="sectionhead"><h2>{t.shared}</h2><button className="secondary" onClick={()=>{setAudio(null);setModal('add');}}>+ {t.newWord}</button></div><div className="wordgrid">{data.cards.filter(c=>c.creator_id).map(c=><button className="vocabcard" key={c.id} onClick={()=>setSelected(c)}><span className="category">{c.creator_name}</span><h3>{c.de}</h3><p>{c.pt}</p><p className="muted">{c.note}</p></button>)}</div>{!data.cards.some(c=>c.creator_id)&&<p>{t.sharedEmpty}</p>}</>}
  {page==='train'&&(completed?<section className="completion panel"><div className="completionmark">✓</div><h1>{t.finish}</h1><p>{t.finishText}</p><button className="primary" onClick={()=>setPage('home')}>{t.back}</button><button className="textbutton" onClick={()=>begin(true)}>{t.practice}</button></section>:<section className="training"><div className="sectionhead"><button className="textbutton" onClick={()=>setPage('home')}>← {t.home}</button><span>{index+1} / {queue.length}</span></div><progress max={queue.length} value={index}/><div className="tabs"><button className={mode==='translation'?'active':''} disabled={!!result} onClick={()=>setMode('translation')}>{t.translation}</button><button className={mode==='listening'?'active':''} disabled={!!result} onClick={()=>setMode('listening')}>{t.listening}</button></div><div className="quiz panel"><span className="category">{current.category}</span><p className="muted">{mode==='listening'?t.listenPrompt:t.translate}</p>{mode==='translation'?<h1>{current[data.user.target==='de'?'pt':'de']}</h1>:<button className="listenbig" onClick={()=>speak(current,data.user.target)}>♪ <span>{t.listen}</span></button>}<form onSubmit={submit}><label>{t.answer}<input key={current.id} autoFocus value={answer} onChange={e=>setAnswer(e.target.value)} disabled={!!result||busy} autoComplete="off" autoCapitalize="none" spellCheck="false" lang={data.user.target==='pt'?'pt-BR':'de'}/></label>{!result&&<div className="actions"><button className="primary" disabled={busy||!answer.trim()}>{busy?t.loading:t.check}</button><button type="button" className="textbutton" disabled={busy} onClick={()=>submit(null,true)}>{t.reveal}</button></div>}</form>{result&&<div className={'feedback '+(result.correct?'success':'retry')} role="status"><strong>{result.correct?t.correct:t.incorrect} {result.xp>0&&'+'+result.xp+' XP'}</strong><p>{t.solution}: <b>{current[data.user.target]}</b></p><button className="textbutton" onClick={()=>speak(current,data.user.target)}>♪ {t.listen} · {current.audio?.lang===data.user.target?t.native:t.synthetic}</button><p>{current.example}</p><p>{current.note}</p>{!result.eligible&&<p className="fine">{t.replay}</p>}<button className="primary" onClick={next}>{t.next} →</button></div>}</div></section>)}
  </main></div>
- {modal==='add'&&<div className="overlay"><section className="modal panel" role="dialog" aria-modal="true" aria-labelledby="addtitle"><div className="sectionhead"><h2 id="addtitle">{t.newWord}</h2><button className="textbutton" disabled={recording||busy} aria-label={t.close} onClick={()=>setModal(null)}>×</button></div>{notice}<form onSubmit={saveCard}><label>Deutsch<input name="de" maxLength="160" required autoFocus/></label><label>Português (Brasil)<input name="pt" maxLength="160" required/></label><label>{t.example}<input name="example" maxLength="500"/></label><label>{t.note}<textarea name="note" maxLength="1000" rows="3"/></label><label>{t.category}<input name="category" maxLength="60" defaultValue={l==='de'?'Alltag':'Dia a dia'}/></label><div className="audiobox"><label>{t.audioLang}<select value={audioLang} disabled={recording} onChange={e=>setAudioLang(e.target.value)}><option value="de">Deutsch</option><option value="pt">Português</option></select></label><button type="button" className="secondary" onClick={record}>{recording?'● '+t.stop:'♪ '+t.record}</button><p className="fine">{t.recordNote}</p>{audio&&<><audio controls src={'data:'+audio.mime+';base64,'+audio.data}/><button type="button" className="textbutton" onClick={()=>setAudio(null)}>{t.removeAudio}</button></>}</div><button className="primary" disabled={busy||recording}>{busy?t.loading:t.save}</button></form></section></div>}
- {selected&&<div className="overlay"><section className="modal panel" role="dialog" aria-modal="true" aria-labelledby="detailtitle"><div className="sectionhead"><span className="category">{selected.category}</span><button className="textbutton" aria-label={t.close} onClick={()=>{setSelected(null);player.current?.pause();window.speechSynthesis?.cancel();}}>×</button></div><h1 id="detailtitle">{selected.de}</h1><h2>{selected.pt}</h2><div className="actions"><button className="secondary" onClick={()=>speak(selected,'de')}>♪ Deutsch</button><button className="secondary" onClick={()=>speak(selected,'pt')}>♪ Português</button></div><p>{selected.example}</p><p>{selected.note}</p><p className="fine">{selected.creator_name||'VTrain'}</p></section></div>}
+ {(modal==='add'||modal==='edit')&&<div className="overlay"><section className="modal panel" role="dialog" aria-modal="true" aria-labelledby="addtitle"><div className="sectionhead"><h2 id="addtitle">{modal==='edit'?t.editWord:t.newWord}</h2><button className="textbutton" disabled={recording||busy} aria-label={t.close} onClick={()=>setModal(null)}>×</button></div>{notice}{modal==='edit'&&<p className="notice">{t.editHelp}</p>}<form key={modal==='edit'?editing.id:'new'} onSubmit={saveCard}><label>Deutsch<input name="de" maxLength="160" required autoFocus defaultValue={modal==='edit'?editing.de:''}/></label><label>Português (Brasil)<input name="pt" maxLength="160" required defaultValue={modal==='edit'?editing.pt:''}/></label><label>{t.example}<input name="example" maxLength="500" defaultValue={modal==='edit'?editing.example:''}/></label><label>{t.note}<textarea name="note" maxLength="1000" rows="3" defaultValue={modal==='edit'?editing.note:''}/></label><label>{t.category}<input name="category" maxLength="60" defaultValue={modal==='edit'?editing.category:l==='de'?'Alltag':'Dia a dia'}/></label><div className="audiobox"><label>{t.audioLang}<select value={audioLang} disabled={recording} onChange={e=>setAudioLang(e.target.value)}><option value="de">Deutsch</option><option value="pt">Português</option></select></label><button type="button" className="secondary" onClick={record}>{recording?'● '+t.stop:'♪ '+t.record}</button><p className="fine">{t.recordNote}</p>{audio&&<><audio controls src={'data:'+audio.mime+';base64,'+audio.data}/><button type="button" className="textbutton" onClick={()=>setAudio(null)}>{t.removeAudio}</button></>}</div><button className="primary" disabled={busy||recording}>{busy?t.loading:modal==='edit'?t.saveChanges:t.save}</button></form></section></div>}
+ {selected&&<div className="overlay"><section className="modal panel" role="dialog" aria-modal="true" aria-labelledby="detailtitle"><div className="sectionhead"><span className="category">{selected.category}</span><button className="textbutton" aria-label={t.close} onClick={()=>{setSelected(null);player.current?.pause();window.speechSynthesis?.cancel();}}>×</button></div><h1 id="detailtitle">{selected.de}</h1><h2>{selected.pt}</h2><div className="actions"><button className="secondary" onClick={()=>speak(selected,'de')}>♪ Deutsch</button><button className="secondary" onClick={()=>speak(selected,'pt')}>♪ Português</button></div><p>{selected.example}</p><p>{selected.note}</p><p className="fine">{selected.creator_name||'VTrain'}</p><button className="primary" onClick={()=>openEditor(selected)}>{t.editWord}</button></section></div>}
  </div>;
 }
 createRoot(document.getElementById('root')).render(<App/>);

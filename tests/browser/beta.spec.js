@@ -41,3 +41,37 @@ test('Portuguese entry selects German as the learning language',async({page})=>{
  await page.getByRole('button',{name:'Conferir',exact:true}).click();
  await expect(page.getByRole('status')).toContainText('Muito bem!');
 });
+
+test('edit an existing starter and retain local progress',async({page})=>{
+ await page.goto('/');
+ await page.getByRole('button',{name:'Weiter →',exact:true}).click();
+ await page.getByRole('button',{name:'Demo ausprobieren'}).click();
+ await page.getByRole('button',{name:/Jetzt lernen/}).click();
+ await page.getByLabel('Deine Übersetzung').fill('Bom dia');
+ await page.getByRole('button',{name:'Prüfen',exact:true}).click();
+ await expect(page.getByRole('status')).toContainText('+10 XP');
+ const before=await page.evaluate(()=>JSON.parse(localStorage.getItem('vt-demo-pt')));
+ await page.getByRole('button',{name:/Wortschatz/}).click();
+ await page.getByRole('textbox',{name:'Wort oder Thema suchen'}).fill('Bom dia');
+ await page.getByRole('button').filter({has:page.getByRole('heading',{name:'Bom dia',exact:true})}).click();
+ await page.getByRole('button',{name:'Vokabel bearbeiten',exact:true}).click();
+ await expect(page.getByLabel('Deutsch',{exact:true})).toHaveValue('Guten Morgen');
+ await page.getByLabel('Erklärung / Merkhilfe').fill('Unsere eigene Erklärung');
+ await page.getByRole('button',{name:'Änderungen speichern',exact:true}).click();
+ const notesOnly=await page.evaluate(()=>JSON.parse(localStorage.getItem('vt-demo-pt')));
+ expect(notesOnly.progress['starter-1']).toEqual(before.progress['starter-1']);
+ expect(notesOnly.stats).toEqual(before.stats);
+ await page.getByRole('button').filter({has:page.getByRole('heading',{name:'Bom dia',exact:true})}).click();
+ await page.getByRole('button',{name:'Vokabel bearbeiten',exact:true}).click();
+ await page.getByLabel('Português (Brasil)',{exact:true}).fill('Bom dia | Olá');
+ await page.getByRole('button',{name:'Änderungen speichern',exact:true}).click();
+ const after=await page.evaluate(()=>JSON.parse(localStorage.getItem('vt-demo-pt')));
+ expect(after.progress['starter-1'].level).toBe(before.progress['starter-1'].level);
+ expect(after.stats.xp).toBe(before.stats.xp);
+ expect(new Date(after.progress['starter-1'].due).getTime()).toBeLessThanOrEqual(Date.now());
+ await page.reload();
+ await page.getByRole('button',{name:'Demo ausprobieren'}).click();
+ await page.getByRole('button',{name:/Wortschatz/}).click();
+ await page.getByRole('textbox',{name:'Wort oder Thema suchen'}).fill('Olá');
+ await expect(page.getByRole('heading',{name:'Bom dia',exact:true})).toBeVisible();
+});

@@ -62,3 +62,9 @@ Database region: Vercel functions use Frankfurt (`fra1`) for the supplied Neon E
 Backend queries scope tandem resources by the authenticated user's team, not a client-provided team ID. Review updates lock the progress row in a transaction so concurrent submissions cannot award duplicate XP. Sessions are hashed in storage. POST requests require a same-origin Origin header and JSON content type. Auth throttling counts attempts by a hash of the deployment-provided client IP. Secrets never enter the frontend bundle.
 
 The initial migration creates a single pilot team; adding users does not require schema changes. Production email verification and password recovery should use a transactional email provider or a managed authentication service.
+
+## Bestehende Vokabeln bearbeiten
+
+In der Detailansicht **Vokabel bearbeiten / Editar palavra** wählen. Alle Mitglieder desselben Tandems können dessen gemeinsame Karten bearbeiten, einschließlich Text, Beispielsatz, Erklärung, Thema und Aufnahme (beibehalten, ersetzen oder entfernen). Starterkarten werden beim ersten Bearbeiten für das Tandem kopiert; andere Tandems behalten die Originale.
+
+Dieses Update benötigt **keine Schema-Migration** und kein erneutes Beta-Setup. Bestehende Accounts, Passwörter, Sessions, XP und Lernstufen bleiben bestehen. Reine Änderungen an Notizen, Beispielen, Kategorien oder Audio behalten den Wiederholungstermin bei. Geänderte Wörter setzen nur die betroffene Karte für bestehende Lernstände des Tandems auf sofort fällig, ohne Lernstufen oder Historie zurückzusetzen. Gleichzeitige Änderungen werden mit einer Konfliktmeldung abgefangen. Nach einem Update die App neu laden, damit der neue Editor erscheint.
