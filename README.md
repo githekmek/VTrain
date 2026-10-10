@@ -1,4 +1,4 @@
-# VTrain
+# VTrain · Beta 0.2.0
 
 Mobile-first vocabulary trainer for German and Brazilian Portuguese. React/Vite frontend, Vercel Node functions, Neon PostgreSQL.
 
@@ -12,9 +12,24 @@ Mobile-first vocabulary trainer for German and Brazilian Portuguese. React/Vite 
 - Individual progress and server-validated answers, XP only for due reviews, daily goal, tandem XP
 - Responsive layout, web manifest and cached app shell
 
+## Beta im Browser einrichten
+
+1. In Vercel das GitHub-Repository `githekmek/VTrain` importieren. Produktionsbranch: `main`, Framework: Vite, Build: `npm run build`, Ausgabe: `dist`, Installation: `npm install`, Node: 22.
+2. Im Neon-Dashboard das bestehende Projekt und die gewünschte Datenbank wählen. Im SQL Editor den gesamten Inhalt von [db/beta-setup.sql](db/beta-setup.sql) ausführen. Das Skript legt Tabellen und 20 Starterkarten an und kann erneut ausgeführt werden.
+3. In Neon über **Connect** die vollständige gepoolte PostgreSQL-Verbindungsadresse kopieren, ohne Shell-Befehl oder umschließende Anführungszeichen.
+4. In Vercel **Project → Settings → Environment Variables** für **Production** setzen:
+   - `DATABASE_URL`: die komplette Neon-Verbindungsadresse, als Secret.
+   - `ALLOWED_EMAILS`: eure beiden E-Mail-Adressen, durch Komma getrennt.
+   - `INVITE_CODE`: einen privat generierten zufälligen Code mit mindestens 20 Zeichen, als Secret.
+5. Ein neues Production-Deployment von `main` erstellen. Bestehende Deployments übernehmen neue Variablen nicht.
+6. Die stabile Production-Domain unter **Domains** verwenden. In einem privaten Browserfenster testen, dass sie ohne Vercel-Konto zugänglich ist. Eventuelle organisationsweite Zugangsvorgaben müssen vom zuständigen Administrator freigegeben werden.
+7. Spielpartner öffnet die Adresse, wählt **Português → Continuar → Criar conta**, trägt seine freigeschaltete E-Mail und euren Einladungscode ein und wählt **Estou aprendendo: Deutsch**. Jeder legt sein eigenes Passwort fest.
+
+Die Anmeldemaske wird erst bei erreichbarer, eingerichteter Datenbank aktiv. Neue Konten sind zusätzlich nur bei gesetzter E-Mail-Freigabe und gültiger Einladungskonfiguration möglich. Passwörter und Verbindungsadressen gehören weder in GitHub noch in den Chat.
+
 ## Local use
 
-Node 22+. Run `npm install`, `npm run dev`. Vite alone provides the frontend/demo; use `vercel dev` for API routes and real login. Secure cookies require HTTPS for authenticated sessions (local HTTPS proxy or Vercel preview).
+Node 22. Run `npm install`, `npm run dev`. Vite alone provides the frontend/demo; use `vercel dev` for API routes and real login. Secure cookies require HTTPS for authenticated sessions (local HTTPS proxy or Vercel preview).
 
 `npm test`, `npm run check`, `npm run build`.
 
@@ -30,7 +45,7 @@ Database region: Vercel functions use Frankfurt (`fra1`) for the supplied Neon E
 
 ## Boundaries of this first version
 
-- This is an initial implementation, not a claim of a deployed or device-tested production service.
+- This is the first invitation-only beta. Deployment and registration on the actual target domain must be verified after environment setup; real iOS/Android device testing remains outstanding.
 - The service worker caches only public app assets, never API responses. Demo works offline after first load. Authenticated offline review and cross-device conflict resolution are not implemented.
 - Audio is limited to 20 seconds / 500 KB, kept as JSON base64 in PostgreSQL for this small pilot. Before wider rollout, migrate it to private object storage with authorized reads, quotas and cleanup.
 - Listening uses a recording when its language matches; otherwise it uses the device voice. Speech recognition / pronunciation scoring is not implemented.

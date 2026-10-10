@@ -33,3 +33,5 @@ jobs:
           DATABASE_URL: postgresql://test:test@localhost:5432/vtrain_test
       - run: npm test
       - run: npm run build
+      - run: npx playwright install --with-deps chromium webkit
+      - run: npm run test:browser

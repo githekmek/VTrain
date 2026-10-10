@@ -5,3 +5,5 @@
 @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 
 .mobilelogout{display:none}@media(max-width:760px){.mobilelogout{display:block;font-size:11px}.topbar{gap:8px}.topbar .language{max-width:135px}}
+
+.betabadge{font-size:9px;letter-spacing:1px;border:1px solid #d5ddca;border-radius:5px;padding:2px 4px;font-weight:500}

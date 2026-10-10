@@ -1,10 +1,10 @@
 {
   "name": "vtrain",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0-beta.1",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": "22.x"
   },
   "scripts": {
     "dev": "vite --host 0.0.0.0",
@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "test": "node --test tests/*.test.js",
     "check": "node --check api/app.js && node --check lib/domain.js",
-    "migrate": "node scripts/migrate.js"
+    "migrate": "node scripts/migrate.js",
+    "test:browser": "playwright test"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.7.0",
@@ -21,5 +22,7 @@
     "react-dom": "^19.1.1",
     "pg": "^8.16.3"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
 }

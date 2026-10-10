@@ -14,6 +14,9 @@ test('API: authentication, tandem isolation, replay safety and logout',{skip:!pr
   await handler(req,res);return res;
  };
  try{
+  const status=await call('status');assert.equal(status.body.configured,true);assert.equal(status.body.registrationEnabled,true);
+  const invite=process.env.INVITE_CODE;process.env.INVITE_CODE='';
+  assert.equal((await call('status')).body.registrationEnabled,false);process.env.INVITE_CODE=invite;
   assert.equal((await call('state')).code,401);
   assert.equal((await call('login',{email:'a',password:'long-password'},'','https://evil.test')).code,403);
   const details={email:'alice@example.test',name:'Alice',password:'correct horse battery',locale:'de',target:'pt',invite:process.env.INVITE_CODE};

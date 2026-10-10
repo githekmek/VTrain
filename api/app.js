@@ -22,7 +22,15 @@ export default async function handler(req,res){
  res.setHeader('Cache-Control','no-store');
  try{
   const op=req.query.op||'state';
-  if(req.method==='GET'&&op==='status')return res.status(200).json({configured:!!pool});
+  if(req.method==='GET'&&op==='status'){
+   if(!pool)return res.status(200).json({configured:false,registrationEnabled:false});
+   try{
+    const check=await pool.query("SELECT to_regclass('public.users') IS NOT NULL AND to_regclass('public.sessions') IS NOT NULL AND to_regclass('public.cards') IS NOT NULL AND to_regclass('public.progress') IS NOT NULL AND to_regclass('public.reviews') IS NOT NULL AND to_regclass('public.teams') IS NOT NULL AND to_regclass('public.auth_limits') IS NOT NULL AS ready");
+    const configured=check.rows[0].ready;
+    const registrationEnabled=configured&&!!process.env.INVITE_CODE&&process.env.INVITE_CODE.length>=20&&(process.env.ALLOWED_EMAILS||'').split(',').some(email=>email.trim());
+    return res.status(200).json({configured,registrationEnabled,version:'0.2.0-beta.1'});
+   }catch{return res.status(200).json({configured:false,registrationEnabled:false});}
+  }
   if(!pool)throw fail(503,'NOT_CONFIGURED');
   if(!['GET','POST'].includes(req.method))throw fail(405,'METHOD');
   if(req.method==='POST'){
