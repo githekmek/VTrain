@@ -5,7 +5,7 @@ test.beforeEach(async({page})=>{
 test('German demo: vocabulary review, persistence and own card on mobile',async({page})=>{
  const errors=[];page.on('pageerror',error=>errors.push(error.message));
  await page.goto('/');
- await page.getByRole('button',{name:'Weiter'}).click();
+ await page.getByRole('button',{name:'Weiter →',exact:true}).click();
  await page.getByRole('button',{name:'Demo ausprobieren'}).click();
  await expect(page.getByText('Demo · nur auf diesem Gerät gespeichert')).toBeVisible();
  await expect(page.getByRole('button',{name:/Jetzt lernen/})).toBeVisible();
