@@ -56,7 +56,7 @@ function App(){
     demoSave({...data,progress:{...data.progress,[card.id]:progress},stats:{xp:data.stats.xp+xp,today:data.stats.today+(eligible?1:0)}});
    }else{r=await api('review',{cardId:card.id,revision:card.revision,answer,revealed});await refresh();}
    setResult(r);
-  }catch(e){setErr(e);}finally{setBusy(false);}
+  }catch(e){setErr(e);if(e.message==='CARD_CHANGED'&&!demo){await refresh().catch(()=>{});setQueue(null);setPage('words');}}finally{setBusy(false);}
  }
  function next(){setIndex(index+1);setResult(null);setAnswer('');}
  function speak(card,lang){
