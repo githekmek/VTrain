@@ -1,0 +1,17 @@
+{
+  "id": "/",
+  "name": "VTrain · Deutsch & Português",
+  "short_name": "VTrain",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f7ef",
+  "theme_color": "#154b3a",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

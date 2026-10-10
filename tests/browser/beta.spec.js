@@ -1,0 +1,43 @@
+import {test,expect} from '@playwright/test';
+test.beforeEach(async({page})=>{
+ await page.route('**/api/app?op=status',route=>route.fulfill({json:{configured:false,registrationEnabled:false}}));
+});
+test('German demo: vocabulary review, persistence and own card on mobile',async({page})=>{
+ const errors=[];page.on('pageerror',error=>errors.push(error.message));
+ await page.goto('/');
+ await page.getByRole('button',{name:'Weiter →',exact:true}).click();
+ await page.getByRole('button',{name:'Demo ausprobieren'}).click();
+ await expect(page.getByText('Demo · nur auf diesem Gerät gespeichert')).toBeVisible();
+ await expect(page.getByRole('button',{name:/Jetzt lernen/})).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.getByRole('button',{name:/Jetzt lernen/}).click();
+ await page.getByLabel('Deine Übersetzung').fill('Bom dia');
+ await page.getByRole('button',{name:'Prüfen',exact:true}).click();
+ await expect(page.getByRole('status')).toContainText('+10 XP');
+ await page.getByRole('button',{name:/Übersicht/}).first().click();
+ await page.getByRole('button',{name:'Wort hinzufügen',exact:true}).click();
+ await page.getByLabel('Deutsch',{exact:true}).fill('der Garten');
+ await page.getByLabel('Português (Brasil)',{exact:true}).fill('o jardim');
+ await page.getByLabel('Erklärung / Merkhilfe').fill('Ein gemeinsames neues Wort.');
+ await page.getByRole('button',{name:'Wort speichern',exact:true}).click();
+ await page.getByRole('button',{name:/Wortschatz/}).click();
+ await page.getByRole('textbox',{name:'Wort oder Thema suchen'}).fill('jardim');
+ await expect(page.getByRole('heading',{name:'o jardim'})).toBeVisible();
+ await page.reload();
+ await page.getByRole('button',{name:'Demo ausprobieren'}).click();
+ await page.getByRole('button',{name:/Wortschatz/}).click();
+ await page.getByRole('textbox',{name:'Wort oder Thema suchen'}).fill('jardim');
+ await expect(page.getByRole('heading',{name:'o jardim'})).toBeVisible();
+ expect(errors).toEqual([]);
+});
+test('Portuguese entry selects German as the learning language',async({page})=>{
+ await page.goto('/');
+ await page.getByRole('button',{name:/Português Aprender juntos/}).click();
+ await page.getByRole('button',{name:'Continuar'}).click();
+ await page.getByRole('button',{name:'Experimentar demonstração'}).click();
+ await page.getByRole('button',{name:/Vamos praticar/}).click();
+ await expect(page.getByRole('heading',{name:'Bom dia',exact:true})).toBeVisible();
+ await page.getByLabel('Sua tradução').fill('Guten Morgen');
+ await page.getByRole('button',{name:'Conferir',exact:true}).click();
+ await expect(page.getByRole('status')).toContainText('Muito bem!');
+});
