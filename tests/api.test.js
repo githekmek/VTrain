@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import pg from 'pg';
+const detailsTeam=()=> '11111111-1111-4111-8111-111111111111';
 test('API: authentication, tandem isolation, replay safety and logout',{skip:!process.env.DATABASE_TEST_URL},async()=>{
  process.env.DATABASE_URL=process.env.DATABASE_TEST_URL;
  process.env.ALLOWED_EMAILS='alice@example.test,bob@example.test';
@@ -41,6 +42,64 @@ test('API: authentication, tandem isolation, replay safety and logout',{skip:!pr
   assert.equal(reviews.reduce((sum,r)=>sum+r.body.xp,0),10);
   assert.equal((await call('review',{cardId:'starter-1',answer:'Bom dia'},cookie)).body.xp,0);
   const wrong=await call('review',{cardId:'starter-2',answer:'wrong'},cookie);assert.equal(wrong.body.correct,false);assert.equal(wrong.body.progress.level,0);
+
+  // Existing accounts and sessions must survive editing without a migration.
+  await db.query('UPDATE users SET team_id=$1 WHERE email=$2',[detailsTeam(),'bob@example.test']);
+  const beforeUsers=await db.query('SELECT id,email,password_hash,locale,target FROM users ORDER BY email');
+  await call('review',{cardId:created.body.id,answer:'o teste'},cookie);
+  await call('review',{cardId:created.body.id,answer:'der Test'},bobCookie);
+  const snapshot=(await call('state',undefined,cookie)).body;
+  const bobSnapshot=(await call('state',undefined,bobCookie)).body;
+  const originalCard=snapshot.cards.find(c=>c.id===created.body.id);
+  const editBody={...originalCard,cardId:originalCard.id,note:'A better explanation'};
+  const metadataEdit=await call('edit-card',editBody,bobCookie);
+  assert.equal(metadataEdit.code,200);assert.equal(metadataEdit.body.wordsChanged,false);
+  let updated=(await call('state',undefined,cookie)).body;
+  assert.deepEqual(updated.progress[originalCard.id],snapshot.progress[originalCard.id]);
+  assert.equal(updated.stats.xp,snapshot.stats.xp);
+  assert.equal((await call('edit-card',{...editBody,note:'Stale overwrite'},cookie)).code,409);
+  let latest=updated.cards.find(c=>c.id===originalCard.id);
+  assert.equal((await call('edit-card',{...latest,cardId:latest.id,audio:{mime:4}},cookie)).code,400);
+  const audio={mime:'audio/wav',lang:'de',data:'UklGRg=='};
+  assert.equal((await call('edit-card',{...latest,cardId:latest.id,audio},cookie)).code,200);
+  latest=(await call('state',undefined,cookie)).body.cards.find(c=>c.id===originalCard.id);
+  assert.deepEqual(latest.audio,audio);
+  assert.equal((await call('edit-card',{...latest,cardId:latest.id,audio:null},cookie)).code,200);
+  latest=(await call('state',undefined,cookie)).body.cards.find(c=>c.id===originalCard.id);
+  const translationEdit=await call('edit-card',{...latest,cardId:latest.id,pt:'o exame'},cookie);
+  assert.equal(translationEdit.code,200);assert.equal(translationEdit.body.wordsChanged,true);
+  updated=(await call('state',undefined,cookie)).body;
+  const bobUpdated=(await call('state',undefined,bobCookie)).body;
+  assert.equal(updated.progress[originalCard.id].level,snapshot.progress[originalCard.id].level);
+  assert.equal(bobUpdated.progress[originalCard.id].level,bobSnapshot.progress[originalCard.id].level);
+  assert.ok(new Date(updated.progress[originalCard.id].due).getTime()<=Date.now());
+  assert.equal(updated.stats.xp,snapshot.stats.xp);
+  assert.equal(bobUpdated.stats.xp,bobSnapshot.stats.xp);
+  assert.equal((await call('review',{cardId:latest.id,answer:'o teste',revision:latest.revision},cookie)).code,409);
+  latest=updated.cards.find(c=>c.id===originalCard.id);
+  const concurrent=await Promise.all(['first','second'].map(note=>call('edit-card',{...latest,cardId:latest.id,note},cookie)));
+  assert.deepEqual(concurrent.map(r=>r.code).sort(),[200,409]);
+  // Starter edits become tandem-scoped copies and carry forward old progress.
+  const starter=updated.cards.find(c=>c.id==='starter-1');
+  const starterProgress=updated.progress['starter-1'];
+  const copied=await call('edit-card',{...starter,cardId:starter.id,note:'Our own pronunciation note'},cookie);
+  assert.equal(copied.code,200);assert.notEqual(copied.body.id,starter.id);
+  const copyState=(await call('state',undefined,cookie)).body;
+  assert.equal(copyState.cards.some(c=>c.id==='starter-1'),false);
+  assert.equal(copyState.cards.some(c=>c.id===copied.body.id),true);
+  assert.equal(copyState.progress[copied.body.id].level,starterProgress.level);
+  assert.equal(+new Date(copyState.progress[copied.body.id].due),+new Date(starterProgress.due));
+  assert.equal((await call('edit-card',{...starter,cardId:starter.id},bobCookie)).code,409);
+  assert.equal((await call('review',{cardId:starter.id,answer:'Bom dia'},cookie)).code,409);
+  await db.query('UPDATE users SET team_id=$1 WHERE email=$2',[otherTeam,'bob@example.test']);
+  const outsider=(await call('state',undefined,bobCookie)).body;
+  assert.equal(outsider.cards.some(c=>c.id==='starter-1'),true);
+  assert.equal(outsider.cards.some(c=>c.id===copied.body.id),false);
+  const privateCopy=copyState.cards.find(c=>c.id===copied.body.id);
+  assert.equal((await call('edit-card',{...privateCopy,cardId:privateCopy.id},bobCookie)).code,404);
+  await db.query('UPDATE users SET team_id=$1 WHERE email=$2',[detailsTeam(),'bob@example.test']);
+  assert.deepEqual((await db.query('SELECT id,email,password_hash,locale,target FROM users ORDER BY email')).rows,beforeUsers.rows);
+
   assert.equal((await call('logout',{},cookie)).code,200);
   assert.equal((await call('state',undefined,cookie)).code,401);
  }finally{await db.end();}

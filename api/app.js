@@ -1,11 +1,21 @@
 import pg from 'pg';
 import {randomBytes,randomUUID,scryptSync,timingSafeEqual,createHash} from 'node:crypto';
-import {matches,schedule,validateCard,cleanText} from '../lib/domain.js';
+import {matches,schedule,validateCard,cleanText,wordContentChanged} from '../lib/domain.js';
 const pool=process.env.DATABASE_URL?new pg.Pool({connectionString:process.env.DATABASE_URL,max:3,idleTimeoutMillis:10000,connectionTimeoutMillis:10000}):null;
 const TEAM='11111111-1111-4111-8111-111111111111';
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const fail=(status,code)=>Object.assign(new Error(code),{status});
 const safeUser=u=>({id:u.id,name:u.name,locale:u.locale,target:u.target});
+const revision=card=>hash(JSON.stringify([card.de,card.pt,card.example,card.note,card.category,card.audio?{mime:card.audio.mime,data:card.audio.data,lang:card.audio.lang}:null]));
+function checkedCard(body){
+ const card=validateCard(body);
+ if(card.audio!==null){
+  const a=card.audio,types=['audio/webm','audio/ogg','audio/mp4','audio/mpeg','audio/wav'];
+  if(typeof a!=='object'||typeof a.mime!=='string'||!types.some(t=>a.mime===t||a.mime.startsWith(t+';'))||typeof a.data!=='string'||a.data.length>700000||!a.data.length||!/^[A-Za-z0-9+/]*={0,2}$/.test(a.data)||!['de','pt'].includes(a.lang))throw fail(400,'AUDIO_INVALID');
+  card.audio={mime:a.mime,data:a.data,lang:a.lang};
+ }
+ return card;
+}
 function passwordHash(password){const salt=randomBytes(16).toString('hex');return salt+':'+scryptSync(password,salt,64).toString('hex');}
 function verify(password,encoded){const [salt,key]=encoded.split(':');return timingSafeEqual(Buffer.from(key,'hex'),scryptSync(password,salt,64));}
 function sessionToken(req){return req.headers.cookie?.split(';').map(x=>x.trim()).find(x=>x.startsWith('vt_session='))?.slice(11)||'';}
@@ -28,7 +38,7 @@ export default async function handler(req,res){
     const check=await pool.query("SELECT to_regclass('public.users') IS NOT NULL AND to_regclass('public.sessions') IS NOT NULL AND to_regclass('public.cards') IS NOT NULL AND to_regclass('public.progress') IS NOT NULL AND to_regclass('public.reviews') IS NOT NULL AND to_regclass('public.teams') IS NOT NULL AND to_regclass('public.auth_limits') IS NOT NULL AS ready");
     const configured=check.rows[0].ready;
     const registrationEnabled=configured&&!!process.env.INVITE_CODE&&process.env.INVITE_CODE.length>=20&&(process.env.ALLOWED_EMAILS||'').split(',').some(email=>email.trim());
-    return res.status(200).json({configured,registrationEnabled,version:'0.2.0-beta.1'});
+    return res.status(200).json({configured,registrationEnabled,version:'0.2.1-beta.1'});
    }catch{return res.status(200).json({configured:false,registrationEnabled:false});}
   }
   if(!pool)throw fail(503,'NOT_CONFIGURED');
@@ -72,32 +82,55 @@ export default async function handler(req,res){
   }
   if(req.method==='GET'&&op==='state'){
    const [cards,progress,stats,partners]=await Promise.all([
-    pool.query('SELECT c.*,u.name AS creator_name FROM cards c LEFT JOIN users u ON u.id=c.creator_id WHERE c.team_id IS NULL OR c.team_id=$1 ORDER BY c.created_at,c.id',[user.team_id]),
+    pool.query('SELECT c.*,u.name AS creator_name FROM cards c LEFT JOIN users u ON u.id=c.creator_id WHERE (c.team_id=$1 OR (c.team_id IS NULL AND NOT EXISTS(SELECT 1 FROM cards o WHERE o.id=$1::text || chr(58) || c.id AND o.team_id=$1))) ORDER BY c.created_at,c.id',[user.team_id]),
     pool.query('SELECT card_id,level,due FROM progress WHERE user_id=$1',[user.id]),
     pool.query('SELECT COALESCE(sum(xp),0)::integer AS xp,count(*) FILTER(WHERE created_at>=date_trunc(\'day\',now()))::integer AS today FROM reviews WHERE user_id=$1',[user.id]),
     pool.query('SELECT u.id,u.name,u.target,COALESCE(sum(r.xp),0)::integer AS xp FROM users u LEFT JOIN reviews r ON r.user_id=u.id WHERE u.team_id=$1 GROUP BY u.id ORDER BY u.created_at',[user.team_id])
    ]);
-   return res.status(200).json({user:safeUser(user),cards:cards.rows,progress:Object.fromEntries(progress.rows.map(p=>[p.card_id,p])),stats:stats.rows[0],partners:partners.rows});
+   return res.status(200).json({user:safeUser(user),cards:cards.rows.map(c=>({...c,revision:revision(c)})),progress:Object.fromEntries(progress.rows.map(p=>[p.card_id,p])),stats:stats.rows[0],partners:partners.rows});
   }
   if(req.method==='POST'&&op==='card'){
-   const c=validateCard(body);
-   if(c.audio){
-    const types=['audio/webm','audio/ogg','audio/mp4','audio/mpeg','audio/wav'];
-    if(!types.some(t=>c.audio.mime===t||c.audio.mime?.startsWith(t+';'))||typeof c.audio.data!=='string'||c.audio.data.length>700000||!/^[A-Za-z0-9+/]*={0,2}$/.test(c.audio.data)||!['de','pt'].includes(c.audio.lang))throw fail(400,'AUDIO_INVALID');
-   }
+   const c=checkedCard(body);
    const count=await pool.query('SELECT count(*)::integer AS n FROM cards WHERE creator_id=$1 AND created_at>now()-interval \'1 day\'',[user.id]);
    if(count.rows[0].n>=50)throw fail(429,'RATE_LIMIT');
    const id=randomUUID();
    await pool.query('INSERT INTO cards(id,team_id,creator_id,de,pt,example,note,category,audio) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',[id,user.team_id,user.id,c.de,c.pt,c.example,c.note,c.category,c.audio?JSON.stringify(c.audio):null]);
    return res.status(201).json({id});
   }
+  if(req.method==='POST'&&op==='edit-card'){
+   if(typeof body.cardId!=='string'||typeof body.revision!=='string')throw fail(400,'FIELDS_REQUIRED');
+   const c=checkedCard(body),client=await pool.connect();
+   try{
+    await client.query('BEGIN');
+    const original=(await client.query('SELECT * FROM cards WHERE id=$1 AND (team_id IS NULL OR team_id=$2) FOR UPDATE',[body.cardId,user.team_id])).rows[0];
+    if(!original)throw fail(404,'NOT_FOUND');
+    if(revision(original)!==body.revision)throw fail(409,'CARD_CHANGED');
+    const changed=wordContentChanged(original,c);
+    const id=original.team_id?original.id:user.team_id+':'+original.id;
+    if(!original.team_id){
+     const existing=await client.query('SELECT id FROM cards WHERE id=$1',[id]);
+     if(existing.rows.length)throw fail(409,'CARD_CHANGED');
+     await client.query('INSERT INTO cards(id,team_id,creator_id,de,pt,example,note,category,audio) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',[id,user.team_id,user.id,c.de,c.pt,c.example,c.note,c.category,c.audio?JSON.stringify(c.audio):null]);
+     // Keep historical reviews and original progress; carry each existing account's
+     // individual state to its tandem-specific version without resetting it.
+     await client.query('INSERT INTO progress(user_id,card_id,level,due) SELECT p.user_id,$1,p.level,p.due FROM progress p JOIN users u ON u.id=p.user_id WHERE p.card_id=$2 AND u.team_id=$3 ON CONFLICT DO NOTHING',[id,original.id,user.team_id]);
+    }else{
+     await client.query('UPDATE cards SET de=$2,pt=$3,example=$4,note=$5,category=$6,audio=$7 WHERE id=$1',[id,c.de,c.pt,c.example,c.note,c.category,c.audio?JSON.stringify(c.audio):null]);
+    }
+    if(changed)await client.query('UPDATE progress p SET due=now() FROM users u WHERE p.user_id=u.id AND p.card_id=$1 AND u.team_id=$2',[id,user.team_id]);
+    await client.query('COMMIT');
+    return res.status(200).json({id,wordsChanged:changed});
+   }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+  }
   if(req.method==='POST'&&op==='review'){
    if(typeof body.cardId!=='string'||typeof body.answer!=='string'||body.answer.length>300)throw fail(400,'FIELDS_REQUIRED');
    const client=await pool.connect();
    try{
     await client.query('BEGIN');
-    const {rows}=await client.query('SELECT * FROM cards WHERE id=$1 AND (team_id IS NULL OR team_id=$2)',[body.cardId,user.team_id]);
+    const {rows}=await client.query('SELECT * FROM cards WHERE id=$1 AND (team_id IS NULL OR team_id=$2) FOR SHARE',[body.cardId,user.team_id]);
     const card=rows[0];if(!card)throw fail(404,'NOT_FOUND');
+    if(body.revision!==undefined&&body.revision!==revision(card))throw fail(409,'CARD_CHANGED');
+    if(!card.team_id&&(await client.query('SELECT id FROM cards WHERE id=$1 AND team_id=$2',[user.team_id+':'+card.id,user.team_id])).rows.length)throw fail(409,'CARD_CHANGED');
     await client.query('INSERT INTO progress(user_id,card_id) VALUES($1,$2) ON CONFLICT DO NOTHING',[user.id,card.id]);
     const previous=(await client.query('SELECT * FROM progress WHERE user_id=$1 AND card_id=$2 FOR UPDATE',[user.id,card.id])).rows[0];
     const correct=body.revealed!==true&&matches(body.answer,card[user.target]);
