@@ -5,6 +5,22 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_USER: test
+          POSTGRES_DB: vtrain_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_TEST_URL: postgresql://test:test@localhost:5432/vtrain_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -12,5 +28,8 @@ jobs:
           node-version: '22'
       - run: npm install --ignore-scripts
       - run: npm run check
+      - run: npm run migrate
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/vtrain_test
       - run: npm test
       - run: npm run build
