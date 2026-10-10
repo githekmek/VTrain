@@ -1,0 +1,10 @@
+CREATE TABLE IF NOT EXISTS teams(id uuid PRIMARY KEY, name text NOT NULL);
+CREATE TABLE IF NOT EXISTS users(id uuid PRIMARY KEY, team_id uuid NOT NULL REFERENCES teams(id), email text NOT NULL UNIQUE, name text NOT NULL, password_hash text NOT NULL, locale text NOT NULL CHECK(locale IN ('de','pt')), target text NOT NULL CHECK(target IN ('de','pt')), created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS sessions(token_hash text PRIMARY KEY,user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,expires_at timestamptz NOT NULL);
+CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);
+CREATE TABLE IF NOT EXISTS cards(id text PRIMARY KEY,team_id uuid REFERENCES teams(id),creator_id uuid REFERENCES users(id),de text NOT NULL,pt text NOT NULL,example text NOT NULL DEFAULT '',note text NOT NULL DEFAULT '',category text NOT NULL DEFAULT 'Alltag',audio jsonb,created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS progress(user_id uuid REFERENCES users(id) ON DELETE CASCADE,card_id text REFERENCES cards(id) ON DELETE CASCADE,level integer NOT NULL DEFAULT 0 CHECK(level BETWEEN 0 AND 6),due timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(user_id,card_id));
+CREATE TABLE IF NOT EXISTS reviews(id uuid PRIMARY KEY,user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,card_id text NOT NULL REFERENCES cards(id),correct boolean NOT NULL,xp integer NOT NULL,created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX IF NOT EXISTS reviews_user_time ON reviews(user_id,created_at);
+CREATE TABLE IF NOT EXISTS auth_limits(key text PRIMARY KEY,count integer NOT NULL,expires_at timestamptz NOT NULL);
+INSERT INTO teams(id,name) VALUES('11111111-1111-4111-8111-111111111111','Unser Tandem') ON CONFLICT DO NOTHING;
